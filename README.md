@@ -5,12 +5,11 @@ a recurring pattern: many of the SNMP check scripts are doing the same things, f
 logically, but are expressed differently. I figured, in the long-term, it would be nice to have a 
 consistent way of doing this that is flexible.
 
-Feel free to provide some comments on the code below. The intent is to replace as many check_snmp-style 
-scripts as possible so that there is a single, maintainable code-base. This will make it easier in the 
-long-run to
+The intent is to replace as many check_snmp-style scripts as possible so that there is a single, 
+maintainable code-base. This will make it easier in the long-run to
 
 1. Add new checks
-2. On-board new people who will have to deal with Nagios checks as there will be a single way to do things
+2. On-board new people who will have to deal with Nagios checks as there will be (mostly) a single way to do things
 3. VASTLY reduce the number of snmpget/walk/bulkwalk calls made by the Nagios server
 4. Integration with configuration management would be much simpler (rather than just storing a bunch of scripts)
 
@@ -25,7 +24,8 @@ The script, written in Ruby, and using the nice ruby-snmp gem, supports the foll
         -C, --config [FILE]              Specify check_snmp_generic configuration file
         -h, --help                       Display this help
 
-Here's an example JSON configuration that can be fed into nagios_snmp.rb to check filesystems on snmpd-enabled Linux hosts:
+Here's an example JSON configuration that can be fed into nagios_snmp.rb to check filesystems on snmpd-enabled 
+Linux hosts:
 
     /* This configuration will scan all SNMP-defined disks for used percentage
        and used inode percentage */
