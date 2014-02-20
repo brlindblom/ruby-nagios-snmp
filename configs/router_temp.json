@@ -1,0 +1,20 @@
+/* This configuration will scan all SNMP-defined disks for used percentage
+   and used inode percentage */
+{
+  // Textual identifier that will display in Nagios output
+  "identifier": "Router",
+
+  // List of OIDs to search with various attributes and filters
+  "oids": {
+
+    // These are individual OIDs for dskPercent and dskPercentNode to get disk usage and inode usage percentage
+    "1.3.6.1.4.1.9.9.91.1.1.1.1.4": { 
+      "desc": "temperature", 
+      "value_map": [
+        [ "%value < 30", 0, "OK"],
+        [ "%value >= 75", 1, "WARNING"],
+        [ "%value >= 80", 1, "CRITICAL"]
+      ] 
+    }
+  }
+}

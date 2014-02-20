@@ -1,0 +1,83 @@
+/* This is a specification file describing the allowed types and attributes of 
+   the nagios-snmp.rb JSON configuration */
+
+// As you can see, we take C/JavaScript-style comments here
+{
+  // This is a brief textual identifier that will display in Nagios output
+  "identifier": "Identify object/device monitored (if needed)",
+
+  // Associative array of OIDs to search with various attributes and filters
+  "oids": {
+
+    "<oid>": { // A text or numeric OID value that will be read and evaluated
+      // an oid definition can contain the following attributes
+
+      // the "id" attribute can be a plain string, identifying the oid's instance
+      // or can reference another OID using the index_oid: modifier to get the instance
+      // string.  For instance, I could say that the parent OID of this attribute references
+      // the / filesystem, so I could say
+      //
+      // "id": "/"
+      //
+      // But in this case, I know SNMP keeps this information in another sub-OID, so I can 
+      // simply reference it:
+      //
+      // "id": "index_oid:1.3.6.1.4.1.2021.9.1.2"
+
+      "id": "<text>|index_oid:<oid>"[,] // JSON-format... comma needed if not last defined element
+
+      // the "range" attribute can contain a string describing a range of values to enumerate for a 
+      // sub-OID (if the parent OID is a sub-OID.  For instance, say I want to check a 4 power supply
+      // devices and I know they are in sequential order:
+      // 
+      // "range": "1-4"
+      // 
+      // This means that the rules for this OID will be applied and evaluated for
+      // <oid>.1, <oid>.2, <oid>.3, and <oid>.4, respectively
+      //
+      // Ranges can also be non-sequential: 
+      //
+      // "range": "1,4,9,22,33"
+      //
+      // and ranges can be derived from another SNMP OID:
+      //
+      // "range": "index_oid:1.3.6.1.4.1.2021.9.1.1"
+
+      "range": "i-k|n1,n2,n3,n4|index_oid:<oid>"[,]
+
+      // the value_map attribute is an array, each element containing a triplet that will be evaluated
+      // against the OIDs value:
+      //
+      // "value_map": [
+      //    [ "%value < 90", 0, "OK" ],
+      //    [ "%value >= 90", 1, "Warning" ],
+      //    [ "%value >= 95", 2, "Critical" ]
+      //  ],
+      // 
+      // In this value map, for the given OID, if its value is less than 90, we return the code 0 and a
+      // text identifier of OK.  Usually, OK evaluations can be ommitted as that is the default that is 
+      // returned when no value_maps match.  Evaluations can use standard Ruby expressions and should
+      // evaluate to true or false.  This means numeric operators, string operators, and regex operators
+      // are supported
+      //
+      
+      "value_map": [ [ "<true_false_expression>", <integer_return_code>, "status string" ][,] ... ][,]
+
+      // There may be OIDs in the range defined that we want to exclude based on specific circumstances.
+      // In this case, we are excluding filesystems that we don't want to check based on the value of their
+      // mount point
+      //
+      // "exclude_index_map": [
+      //  [ "%q{%value} =~ /(devtmpfs|sysfs|proc|devpts|sunrpc|none|[a-zA-Z0-9\.]+\:.*|loop\d+)/", "1.3.6.1.4.1.2021.9.1.3" ]
+      // ]
+      //
+
+      "exclude_index_map": [ [ "<true_false_expression>", "<sub-OID>" ][,] ... ][,]
+
+    }[,]
+
+    // The default OID is special.  Its attributes apply to all other OIDs unless overrode by the individual OIDs
+    "default": { ... }[,]
+    ...[,]
+  }
+}
