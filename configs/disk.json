@@ -4,9 +4,6 @@
   // Textual identifier that will display in Nagios output
   "identifier": "Host disk usage",
 
-  // Will display list of sub devices even if status = OK
-  "ok_display": true,
-
   // List of OIDs to search with various attributes and filters
   "oids": {
 
@@ -22,9 +19,9 @@
       // each evaluation to an appropriate return code and information string.  Any Ruby-based
       // conditional statement is valid
       "value_map": [
-        [ "%value < 90", 0, "OK" ],
-        [ "%value >= 90", 1, "Warning" ],
-        [ "%value >= 95", 2, "Critical" ]
+        [ "%value < 90", 0, null ],
+        [ "%value >= 90", 1, null ],
+        [ "%value >= 95", 2, null ]
       ],
       
       // Each OID will inherit a range.  In this case, we will derive the range from an index OID

@@ -31,7 +31,7 @@ def dbgp(level, *args)
 end 
 
 class NagiosSNMP
-  attr_accessor :return_code, :perror, :snmp_host, :snmp_community, :snmp_version, :param_file, :identifier
+  attr_accessor :return_code, :perror, :snmp_host, :snmp_community, :snmp_version, :param_file, :identifier, :snmp_manager
 
   def initialize(snmp_host, snmp_community, snmp_version, param_file, strict)
     @snmp_host      = snmp_host 
@@ -42,36 +42,53 @@ class NagiosSNMP
     @return_code    = 0
     @id_list        = {}
     @strict         = strict
+    @oid_list = []
+
+    file = File.open(@param_file, "rb")
+    if file.nil?
+      raise "Error opening parameter file: #{@param_file}"
+    else
+      cfg = file.read
+      @param_map = JSON.parse(cfg)
+    end
+
+    @identifier = @param_map['identifier']
     
-    return nil if parse_param_file != 0
+    @snmp_manager = ::SNMP::Manager.new(:host => @snmp_host, :community => @snmp_community, :MibModules => @param_map['mibs'])
+
+    # generate our oid list
+    oid_base_list = @param_map['oids'].keys.reject{|i| i == 'default'}
+    oid_base_list.each { |oid| @oid_list.concat(range_expand(oid)) }
   end
 
   def evaluate
     dbgp LOG_INFO, "NagiosSNMP::evaluate(): Bulk getting oids: #{@oid_list.join(", ")}"
 
-    snmp_manager do |manager|
-      result = manager.get(@oid_list.map{ |oid| ::SNMP::ObjectId.new(oid) })
-      items = result.varbind_list
+    result = @snmp_manager.get(@oid_list.map{ |oid| ::SNMP::ObjectId.new(oid) })
+    items = result.varbind_list
 
-      items.each do |item|
-        oid = item.name.join('.')
-        if item.value.to_s == "noSuchInstance"
-          if @strict
-            set_return_code STATE_UNKNOWN
-            @perror << "#{oid} couldn't be checked"
-          end
-          dbgp LOG_INFO, "NagiosSNMP::evaluate(): Tried to get invalid OID #{oid}"
-          next
+    items.each do |item|
+      oid = item.name.join('.')
+      if item.value.to_s == "noSuchInstance"
+        if @strict
+          set_return_code STATE_UNKNOWN
+          @perror << "#{oid} couldn't be checked"
         end
-        dbgp LOG_VERBOSE, "NagiosSNMP.evaluate(): checking #{oid}"
-        value_map = get_param_for_oid(oid, 'value_map')
-        (message, rc) = map_to_value_map(oid, item.value, value_map)
-        if rc > STATE_OK
-          set_return_code rc
-          @perror << message if !message.nil?
-        end
+        dbgp LOG_INFO, "NagiosSNMP::evaluate(): Tried to get invalid OID #{oid}"
+        next
+      end
+      dbgp LOG_VERBOSE, "NagiosSNMP.evaluate(): checking #{oid}"
+      value_map = get_param_for_oid(oid, 'value_map')
+      (message, rc) = map_to_value_map(oid, item.value, value_map)
+      if rc > STATE_OK
+        set_return_code rc
+        @perror << message if !message.nil?
       end
     end
+  end
+
+  def close
+    @snmp_manager.close
   end
 
   # These are helpers for debugging
@@ -85,17 +102,10 @@ class NagiosSNMP
 
   # Prints our error strings from @perror, into a single-line output for Nagios
   def error_pretty_print
-    @identifier + ": " + @perror.join(", ")
+    ($verbose > 0 ? @identifier + ": " : nil).to_s + @perror.join(", ")
   end
 
   private
-    # This lets us specify this method just once, and we can reference it as snmp_manager elsewhere
-    def snmp_manager(&block)
-      dbgp LOG_INFO, "::SNMP::Manager.open(:host => #{self.snmp_host}, :community => #{self.snmp_community}, :MibModules => #{@param_map['mibs']}, ...)"
-      ::SNMP::Manager.open(:host => self.snmp_host, :community => self.snmp_community, :MibModules => @param_map['mibs'], &block)
-    end
-
-    
     def parse_map(map_string, value)
       map_string.gsub("%value", value.to_s)
     end
@@ -107,7 +117,7 @@ class NagiosSNMP
       best_message = nil
       value_map.each do |map|
         if eval parse_map(map[0], value) and map[1] > best_code
-          best_message = get_descriptor_for_oid(oid) + " = " + value.to_s + ": " + map[2].to_s
+          best_message = get_descriptor_for_oid(oid) + " = " + value.to_s + (map[2].nil? ? nil : " " + map[2].to_s).to_s
           best_code = map[1]
         end
       end
@@ -129,9 +139,7 @@ class NagiosSNMP
       if id.to_s =~ /^index_oid:.*/
         search_oid = id.split(':')[1] + "." + oid_index.to_s
         dbgp LOG_DEBUG, "Getting descriptor for #{orig_oid} => #{search_oid}"
-        snmp_manager do |manager|
-          id = manager.get_value(search_oid)
-        end
+        id = @snmp_manager.get_value(search_oid)
       elsif id.nil?
         id = oid_index
       end
@@ -148,25 +156,6 @@ class NagiosSNMP
       else
         return false
       end
-    end
-
-    # read in our param file and convert it into a nice usable hash, and generate our bulk get oid list
-    def parse_param_file
-      @oid_list = []
-      file = File.open(@param_file, "rb")
-      if file.nil?
-        $sterr.puts "Error opening parameter file: #{@param_file}"
-        return -1
-      else
-        cfg = file.read
-        @param_map = JSON.parse(cfg)
-      end
-      @identifier = @param_map['identifier']
-
-      # generate our oid list
-      oid_base_list = @param_map['oids'].keys.reject{|i| i == 'default'}
-      oid_base_list.each { |oid| @oid_list.concat(range_expand(oid)) }
-      return 0
     end
 
     # for a given oid, get the value for a specified set parameter
@@ -193,9 +182,7 @@ class NagiosSNMP
       dbgp LOG_DEBUG, "get_snmp_index_list(#{oid}, #{oid_to}, #{exclude_table.to_s})"
       
       ids = []
-      snmp_manager do |manager|
-        manager.walk(oid) { |result| ids << result.value.to_i }
-      end
+      @snmp_manager.walk(oid) { |result| ids << result.value.to_i }
 
       oids = map_with_excluded_index(oid_to, ids, exclude_table)
       dbgp LOG_INFO, "get_snmp_index_list() filtered to #{oids.pretty_inspect.to_s} #{oids.map{|i| get_descriptor_for_oid(i)}.pretty_inspect.to_s}"
@@ -217,17 +204,15 @@ class NagiosSNMP
         end
       end
       
-      snmp_manager do |manager|
-        local_oid_list = filter_oids.map { |id| ::SNMP::ObjectId.new(id) }
-        result = manager.get_bulk(0, 1, local_oid_list)
-        list = result.varbind_list
+      local_oid_list = filter_oids.map { |id| ::SNMP::ObjectId.new(id) }
+      result = @snmp_manager.get_bulk(0, 1, local_oid_list)
+      list = result.varbind_list
 
-        list.each do |i|
-          exclude_table.each do |t|
-            e_oid = oid_to + "." + i.name[-1].to_s
-            eval_code = "exclude_map_oid_list << e_oid if not #{parse_map(t[0], i.value.to_s)}"
-            eval eval_code
-          end
+      list.each do |i|
+        exclude_table.each do |t|
+          e_oid = oid_to + "." + i.name[-1].to_s
+          eval_code = "exclude_map_oid_list << e_oid if not #{parse_map(t[0], i.value.to_s)}"
+          eval eval_code
         end
       end
       return exclude_map_oid_list
@@ -285,32 +270,46 @@ if options[:cfg].nil?
   exit(-1)
 end
 
-begin
-  obj = NagiosSNMP.new(options[:host], options[:community], options[:version], options[:cfg], options[:strict])
-rescue Exception => e
-  puts "nagios_snmp.rb: #{e.message}"
-  exit(STATE_UNKNOWN)
-end
-
-dbgp LOG_VERBOSE, obj.oid_list.pretty_inspect.to_s
-dbgp LOG_VERBOSE, JSON.pretty_generate(JSON.parse(obj.map.to_json))
-
-if obj.nil?
-  $stderr.puts "Error parsing #{ARGV[0]}... Exiting."
-  exit(STATE_UNKNOWN)
-end
-
-begin
-  obj.evaluate
-rescue Exception => e
-  puts "nagios_snmp.rb: #{e.message}"
-  exit(STATE_UNKNOWN)
-end
-
-if obj.return_code != 0
-  puts obj.error_pretty_print
-  exit(obj.return_code)
+if $verbose == 0
+  begin
+    nagios_obj = NagiosSNMP.new(options[:host], options[:community], options[:version], options[:cfg], options[:strict])
+  rescue Exception => e
+    puts "1 nagios_snmp.rb: #{e.message}"
+    exit(STATE_UNKNOWN)
+  end
 else
-  puts obj.identifier + ": OK"
+  nagios_obj = NagiosSNMP.new(options[:host], options[:community], options[:version], options[:cfg], options[:strict])
+end
+
+dbgp LOG_VERBOSE, nagios_obj.oid_list.pretty_inspect.to_s
+dbgp LOG_VERBOSE, JSON.pretty_generate(JSON.parse(nagios_obj.map.to_json))
+
+if nagios_obj.nil?
+  $stderr.puts "Error parsing #{options[:cfg]}... Exiting."
+  exit(STATE_UNKNOWN)
+end
+
+# if we're verbose, let's get the full stack trace
+if $verbose == 0
+  begin
+    nagios_obj.evaluate
+  rescue Exception => e
+    puts "2 nagios_snmp.rb: #{e.message}"
+    nagios_obj.close
+    exit(STATE_UNKNOWN)
+  end
+else
+  nagios_obj.evaluate
+end
+
+
+if nagios_obj.return_code != 0
+  puts(nagios_obj.error_pretty_print)
+  rc = nagios_obj.return_code
+  nagios_obj.close
+  exit(rc)
+else
+  puts(($verbose > 0 ? nagios_obj.identifier + ": " : nil).to_s + "OK")
+  nagios_obj.close
   exit(0)
 end
