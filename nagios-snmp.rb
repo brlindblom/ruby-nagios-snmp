@@ -273,7 +273,9 @@ optparse = OptionParser.new do |opts|
   opts.on("-e", "--extendid [STRING]", "Specify an SNMP EXTEND OID string") { |v| options[:extend] = v }
   opts.on("-H", "--host [HOSTNAME]", "Specify SNMP agent host") { |v| options[:host] = v }
   opts.on("-s", "--strict", "If OIDs in a defined range are missing, generate an error") { |v| options[:strict] = true }
-  opts.on("-C", "--config [FILE]", "Specify check_snmp_generic configuration file") { |v| options[:cfg] = v }
+  opts.on("-C", "--config [NAME]", "Specify configuration") { |v| options[:cfg] = v }
+  opts.on("-d", "--cfgdir [DIR]", "Specify default configuration directory (/etc/nagios-snmp.rb.d default)") { |v| options[:cfgdir] = v }
+  opts.on("-l", "--listcfg", "List available configurations") { |v| options[:list] = true }
   opts.on("-h", "--help", "Display this help") do |v|
     puts opts
     exit
@@ -282,6 +284,9 @@ end.parse!
 
 dbgp LOG_INFO, "Verbosity: #{$verbose}"
 dbgp LOG_INFO, "Command line option hash: #{options.pretty_inspect.to_s}"
+
+#if options[:list]
+   
 
 if options[:cfg].nil? and options[:extend].nil?
   $stderr.puts "Specifying a configuration with -C or an extend ID with -e is mandatory!"
