@@ -1,0 +1,30 @@
+{
+  "identifier": "SFA 10k Controller Status",
+  "oids": {
+    "default": {
+      "value_map": [
+        [ "%value == 2", 0, "Healthy" ],
+        [ "%value != 2", 2, "Not Healthy" ]
+      ],
+      "range": "1-4"
+    },
+    "1.3.6.1.4.1.5206.3.29.1.6.1024.1": {
+      "range": null,
+      "desc": "Horizontal Fan Module"
+    },
+    "1.3.6.1.4.1.5206.3.29.1.6.1025.1": {
+      "range": null,
+      "desc": "Vertical Fan Module"
+    },
+    "1.3.6.1.4.1.5206.3.29.1.6.1023": {
+      "desc": "fabric board"
+    },
+    "1.3.6.1.4.1.5206.3.29.1.6.1013": {
+      "range": "1-6",
+      "desc": "line board"
+    },
+    "1.3.6.1.4.1.5206.3.29.1.6.1016": {
+      "desc": "power supply"
+    }
+  }
+}

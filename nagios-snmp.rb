@@ -31,37 +31,37 @@ def dbgp(level, *args)
 end 
 
 class NagiosSNMP
-  attr_accessor :return_code, :perror, :snmp_host, :snmp_community, :snmp_version, :param_file, :identifier, :snmp_manager, :snmp_extend_id
+  attr_accessor :return_code, :perror, :snmp_host, :snmp_community, :snmp_version, :config, :identifier, 
+                :snmp_manager, :snmp_extend_id, :strict, :oid_list, :config_path
 
-  def initialize(snmp_host, snmp_community, snmp_version, param_file, strict, snmp_extend_id)
-    @snmp_host      = snmp_host 
-    @snmp_community = snmp_community
-    @snmp_version   = snmp_version
-    @snmp_extend_id = snmp_extend_id
-    @param_file     = param_file
-    @perror         = []
-    @return_code    = 0
-    @id_list        = {}
-    @strict         = strict
-    @oid_list = []
+  def initialize
+    self.oid_list = []
+    self.perror = []
+    self.return_code = 0
+    yield self if block_given?
+  end
 
-    if @snmp_extend_id.nil?
-      file = File.open(@param_file, "rb")
+  def parse_config
+    if self.snmp_extend_id.nil? and !self.config.nil?
+      fname = self.config_path + "/" + self.config + ".json"
+      file = File.open(fname, "rb")
       if file.nil?
-        raise "Error opening parameter file: #{@param_file}"
+        raise "Error opening parameter file: #{fname}"
       else
         cfg = file.read
         @param_map = JSON.parse(cfg)
       end
 
       @identifier = @param_map['identifier']
-      @snmp_manager = ::SNMP::Manager.new(:host => @snmp_host, :community => @snmp_community, :MibModules => @param_map ? @param_map['mibs'] : nil)
+      @snmp_manager = ::SNMP::Manager.new(:host => self.snmp_host, :community => self.snmp_community, :MibModules => @param_map ? @param_map['mibs'] : nil)
     
       # generate our oid list
       oid_base_list = @param_map['oids'].keys.reject{|i| i == 'default'}
-      oid_base_list.each { |oid| @oid_list.concat(range_expand(oid)) }
-    else 
+      oid_base_list.each { |oid| self.oid_list.concat(range_expand(oid)) }
+    elsif !self.snmp_extend_id.nil?
       @snmp_manager = ::SNMP::Manager.new(:host => @snmp_host, :community => @snmp_community, :MibModules => nil)
+    else
+      raise "Arument Error"
     end
   end
 
@@ -77,7 +77,7 @@ class NagiosSNMP
         if item.value.to_s == "noSuchInstance"
           if @strict
             set_return_code STATE_UNKNOWN
-            @perror << "#{oid} couldn't be checked"
+            self.perror << "#{oid} couldn't be checked"
           end
           dbgp LOG_INFO, "NagiosSNMP::evaluate(): Tried to get invalid OID #{oid}"
           next
@@ -89,7 +89,7 @@ class NagiosSNMP
 
         if rc > STATE_OK
           set_return_code rc
-          @perror << message if !message.nil?
+          self.perror << message if !message.nil?
         end
       end
     else
@@ -100,7 +100,7 @@ class NagiosSNMP
       # The SNMP extend scripts should just map directly to Nagios return codes
       set_return_code result[1].value
       @identifier = @snmp_extend_id
-      @perror << result[0].value
+      self.perror << result[0].value
     end
   end
 
@@ -119,7 +119,7 @@ class NagiosSNMP
 
   # Prints our error strings from @perror, into a single-line output for Nagios
   def error_pretty_print
-    ($verbose > 0 ? @identifier + ": " : nil).to_s + @perror.join(", ")
+    ($verbose > 0 ? @identifier + ": " : nil).to_s + self.perror.join(", ")
   end
 
   private
@@ -262,7 +262,8 @@ options = {
   :community => "public",
   :version => 2,
   :strict => false,
-  :cfg => nil
+  :cfg => nil,
+  :cfgdir => "/etc/nagios-snmp.d"
 }
 
 optparse = OptionParser.new do |opts|
@@ -274,7 +275,7 @@ optparse = OptionParser.new do |opts|
   opts.on("-H", "--host [HOSTNAME]", "Specify SNMP agent host") { |v| options[:host] = v }
   opts.on("-s", "--strict", "If OIDs in a defined range are missing, generate an error") { |v| options[:strict] = true }
   opts.on("-C", "--config [NAME]", "Specify configuration") { |v| options[:cfg] = v }
-  opts.on("-d", "--cfgdir [DIR]", "Specify default configuration directory (/etc/nagios-snmp.rb.d default)") { |v| options[:cfgdir] = v }
+  opts.on("-d", "--cfgdir [DIR]", "Specify default configuration directory (/etc/nagios-snmp.d default)") { |v| options[:cfgdir] = v }
   opts.on("-l", "--listcfg", "List available configurations") { |v| options[:list] = true }
   opts.on("-h", "--help", "Display this help") do |v|
     puts opts
@@ -285,8 +286,10 @@ end.parse!
 dbgp LOG_INFO, "Verbosity: #{$verbose}"
 dbgp LOG_INFO, "Command line option hash: #{options.pretty_inspect.to_s}"
 
-#if options[:list]
-   
+if options[:list]
+  puts Dir.entries(options[:cfgdir]).reject{ |i| i !~ /\.json$/ }.join("\n").gsub(/\.json/,"")
+  exit(0)
+end
 
 if options[:cfg].nil? and options[:extend].nil?
   $stderr.puts "Specifying a configuration with -C or an extend ID with -e is mandatory!"
@@ -300,13 +303,31 @@ end
 
 if $verbose == 0
   begin
-    nagios_obj = NagiosSNMP.new(options[:host], options[:community], options[:version], options[:cfg], options[:strict], options[:extend])
+    nagios_obj = NagiosSNMP.new do |i|
+      i.snmp_host = options[:host]
+      i.snmp_community = options[:community]
+      i.snmp_version = options[:version]
+      i.snmp_extend_id = options[:extend]
+      i.config = options[:cfg]
+      i.strict = options[:strict]
+      i.config_path = options[:cfgdir]
+    end
+    nagios_obj.parse_config
   rescue Exception => e
     puts "nagios_snmp.rb: #{e.message}"
     exit(STATE_UNKNOWN)
   end
 else
-  nagios_obj = NagiosSNMP.new(options[:host], options[:community], options[:version], options[:cfg], options[:strict], options[:extend])
+  nagios_obj = NagiosSNMP.new do |i|
+    i.snmp_host = options[:host]
+    i.snmp_community = options[:community]
+    i.snmp_version = options[:version]
+    i.snmp_extend_id = options[:extend]
+    i.config = options[:cfg]
+    i.strict = options[:strict]
+    i.config_path = options[:cfgdir]
+  end
+  nagios_obj.parse_config
 end
 
 dbgp LOG_VERBOSE, nagios_obj.oid_list.pretty_inspect.to_s
